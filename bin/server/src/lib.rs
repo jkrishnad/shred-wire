@@ -36,12 +36,14 @@ pub struct Config {
     pub tokens: Vec<String>,
     /// Made-up transactions per second.
     pub tx_per_sec: u64,
+    /// Size of each made-up transaction.
+    pub tx_bytes: usize,
 }
 
 /// Serves the feed on the listener until it fails.
 pub async fn serve(listener: TcpListener, config: Config) -> Result<(), tonic::transport::Error> {
     let (updates, _) = broadcast::channel(BUFFER);
-    let producer = tokio::spawn(produce(updates.clone(), config.tx_per_sec));
+    let producer = tokio::spawn(produce(updates.clone(), config.tx_per_sec, config.tx_bytes));
 
     let feed = Feed {
         updates,
@@ -109,7 +111,7 @@ fn check_token(tokens: &[String], request: Request<()>) -> Result<Request<()>, S
 }
 
 /// Numbers every update and hands it to the subscribers.
-async fn produce(updates: broadcast::Sender<SubscribeResponse>, tx_per_sec: u64) {
+async fn produce(updates: broadcast::Sender<SubscribeResponse>, tx_per_sec: u64, tx_bytes: usize) {
     let start = Instant::now();
     let mut ticks = tokio::time::interval(TICK);
     let mut seq = 0;
@@ -129,7 +131,7 @@ async fn produce(updates: broadcast::Sender<SubscribeResponse>, tx_per_sec: u64)
 
         let due = (elapsed.as_nanos() * u128::from(tx_per_sec) / 1_000_000_000) as u64;
         while txs_sent < due {
-            let tx = made_up_tx(slot, in_slot, seq);
+            let tx = made_up_tx(slot, in_slot, seq, tx_bytes);
             send(&updates, &mut seq, Kind::Tx(tx));
             txs_sent += 1;
             in_slot += 1;
@@ -158,7 +160,7 @@ fn send(updates: &broadcast::Sender<SubscribeResponse>, seq: &mut u64, kind: Kin
 }
 
 /// A tx with the right shape and no real contents. The signature holds the seq.
-fn made_up_tx(slot: u64, position: u32, seq: u64) -> Tx {
+fn made_up_tx(slot: u64, position: u32, seq: u64, tx_bytes: usize) -> Tx {
     let mut signature = vec![0; 64];
     signature[..8].copy_from_slice(&seq.to_le_bytes());
     let now = wall_ns();
@@ -167,7 +169,7 @@ fn made_up_tx(slot: u64, position: u32, seq: u64) -> Tx {
         entry: 0,
         position,
         signature,
-        transaction: Vec::new(),
+        transaction: vec![0; tx_bytes],
         rebuilt: false,
         first_shred_ns: now,
         decoded_ns: now,

@@ -15,6 +15,9 @@ struct Args {
     /// Made-up transactions per second.
     #[arg(long, default_value_t = 1000)]
     tx_per_sec: u64,
+    /// Size of each made-up transaction.
+    #[arg(long, default_value_t = 0)]
+    tx_bytes: usize,
 }
 
 #[tokio::main]
@@ -24,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = server::Config {
         tokens: args.tokens,
         tx_per_sec: args.tx_per_sec,
+        tx_bytes: args.tx_bytes,
     };
     server::serve(listener, config).await?;
     Ok(())

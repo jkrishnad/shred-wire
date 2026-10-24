@@ -144,6 +144,7 @@ impl Server {
             let config = server::Config {
                 tokens: vec![KEY.into()],
                 tx_per_sec: 1000,
+                tx_bytes: 0,
             };
             server::serve(TcpListener::from_std(listener).unwrap(), config).await
         });
