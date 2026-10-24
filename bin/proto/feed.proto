@@ -1,0 +1,48 @@
+syntax = "proto3";
+package shredwire;
+
+// The server sends a random boot epoch in the response headers (x-shredwire-epoch).
+// Same epoch on reconnect: the missing global seq range is exact. New epoch: seq was reset.
+service FeedService {
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+}
+
+message SubscribeRequest {
+  map<string, TxFilter> filters = 1;   // named, like Yellowstone
+}
+
+message TxFilter {
+  optional bool vote = 1;
+  repeated string account_include = 2;
+  repeated string account_exclude = 3;
+  repeated string account_required = 4;
+}
+
+message SubscribeResponse {
+  uint64 seq = 1;                        // global per server boot, see the epoch above
+  repeated string filters = 2;           // which of THIS client's filters matched
+  oneof kind {
+    Tx tx = 3;
+    Heartbeat heartbeat = 4;             // every 1 s, always
+  }
+}
+
+message Heartbeat {
+  fixed64 sent_ns = 1;                   // server wall clock, Unix epoch ns
+  uint64  last_slot = 2;                 // newest slot the server has seen
+}
+
+message Tx {
+  uint64  slot           = 1;     // varint, grows slowly
+  uint32  entry          = 2;     // entry index inside the slot
+  uint32  position       = 3;     // tx position inside the entry
+  bytes   signature      = 4;     // 64 raw bytes
+  bytes   transaction    = 5;     // raw serialized transaction
+  bool    rebuilt        = 6;     // part of it came from Reed-Solomon, not the wire
+  fixed64 first_shred_ns = 7;     // first shred of its FEC set
+  fixed64 decoded_ns     = 8;     // the packet that let its batch decode arrived
+  fixed64 emitted_ns     = 9;     // handed to the hub
+}
+
+// All *_ns fields: wall clock (CLOCK_REALTIME), Unix epoch nanoseconds, chrony-synced,
+// so clients on other machines can compare them. Durations inside the box use the monotonic clock.

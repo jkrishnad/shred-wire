@@ -1,0 +1,8 @@
+version: v2
+lint:
+  use:
+    - STANDARD
+  # one unversioned package in this folder, by choice
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+    - PACKAGE_VERSION_SUFFIX
