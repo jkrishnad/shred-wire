@@ -6,6 +6,12 @@ edition.workspace = true
 [dependencies]
 clap.workspace = true
 proto.workspace = true
+shred-core.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true
+wincode.workspace = true
+
+[dev-dependencies]
+solana-transaction.workspace = true

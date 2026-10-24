@@ -1,22 +1,25 @@
 //! The shredwire server. It checks the API key, then streams every update to every subscriber.
 //!
-//! One producer task numbers each update with a global seq and puts it on a broadcast channel.
-//! Every subscriber reads its own copy, and one that falls too far behind is closed with
+//! source fills the hub: verified transactions from shreds, live or from a pcap file, or made-up ones.
+//! hub numbers every update with a global seq and hands a copy to each subscriber.
+//! A heartbeat goes out every second. A subscriber that falls too far behind is closed with
 //! RESOURCE_EXHAUSTED instead of slowing the others down.
-//! The transactions are made up, at a fixed rate, with a heartbeat every second.
+
+pub mod hub;
+pub mod source;
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use proto::feed_service_server::{FeedService, FeedServiceServer};
 use proto::subscribe_response::Kind;
 use proto::{EPOCH_HEADER, TOKEN_HEADER};
-use proto::{Heartbeat, SubscribeRequest, SubscribeResponse, Tx};
+use proto::{Heartbeat, SubscribeRequest, SubscribeResponse};
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
 use tokio_stream::{Stream, StreamExt};
@@ -24,45 +27,67 @@ use tonic::metadata::{AsciiMetadataValue, MetadataValue};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
+use hub::Hub;
+pub use source::Source;
+
 /// Updates a subscriber may fall behind before it is closed.
 const BUFFER: usize = 4096;
 const HEARTBEAT: Duration = Duration::from_secs(1);
-/// The producer wakes this often and sends every tx that came due since.
-const TICK: Duration = Duration::from_millis(1);
-const SLOT_NS: u128 = 200_000_000;
 
 pub struct Config {
     /// API keys allowed to subscribe.
     pub tokens: Vec<String>,
-    /// Made-up transactions per second.
-    pub tx_per_sec: u64,
-    /// Size of each made-up transaction.
-    pub tx_bytes: usize,
+    /// Where the transactions come from.
+    pub source: Source,
 }
 
-/// Serves the feed on the listener until it fails.
-pub async fn serve(listener: TcpListener, config: Config) -> Result<(), tonic::transport::Error> {
-    let (updates, _) = broadcast::channel(BUFFER);
-    let producer = tokio::spawn(produce(updates.clone(), config.tx_per_sec, config.tx_bytes));
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Reading shreds failed, shown exactly as shred-core words it.
+    #[error(transparent)]
+    Core(#[from] shred_core::error::Error),
+    #[error("no leader schedule in {0}, needed to check every shred")]
+    NoLeaders(PathBuf),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("grpc: {0}")]
+    Transport(#[from] tonic::transport::Error),
+}
+
+/// Serves the feed on the listener until it fails or the shred source stops with an error.
+pub async fn serve(listener: TcpListener, config: Config) -> Result<(), Error> {
+    let hub = Arc::new(Hub::new(BUFFER));
+    let mut running = source::start(config.source, hub.clone())?;
+    let heartbeat = tokio::spawn(heartbeat(hub.clone()));
 
     let feed = Feed {
-        updates,
+        hub,
         epoch: boot_epoch(),
     };
     let tokens = Arc::new(config.tokens);
     let service =
         FeedServiceServer::with_interceptor(feed, move |request| check_token(&tokens, request));
-
-    let result = Server::builder()
+    let server = Server::builder()
         .add_service(service)
-        .serve_with_incoming(TcpListenerStream::new(listener))
-        .await;
-    producer.abort();
+        .serve_with_incoming(TcpListenerStream::new(listener));
+
+    // a source that ends cleanly, like a pcap file, leaves the server running with heartbeats
+    let failed = async {
+        match (&mut running.done).await {
+            Ok(Err(e)) => e,
+            _ => std::future::pending().await,
+        }
+    };
+    let result = tokio::select! {
+        result = server => result.map_err(Error::from),
+        e = failed => Err(e),
+    };
+    heartbeat.abort();
     result
 }
 
 struct Feed {
-    updates: broadcast::Sender<SubscribeResponse>,
+    hub: Arc<Hub>,
     epoch: AsciiMetadataValue,
 }
 
@@ -76,19 +101,18 @@ impl FeedService for Feed {
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         // filters are not checked against the transactions yet, so every tx matches all of them
         let names: Vec<String> = request.into_inner().filters.into_keys().collect();
-        let stream =
-            BroadcastStream::new(self.updates.subscribe()).map(move |update| match update {
-                Ok(mut update) => {
-                    if matches!(update.kind, Some(Kind::Tx(_))) {
-                        update.filters = names.clone();
-                    }
-                    Ok(update)
+        let stream = BroadcastStream::new(self.hub.subscribe()).map(move |update| match update {
+            Ok(mut update) => {
+                if matches!(update.kind, Some(Kind::Tx(_))) {
+                    update.filters = names.clone();
                 }
-                // tonic ends the stream after the first error
-                Err(BroadcastStreamRecvError::Lagged(missed)) => Err(Status::resource_exhausted(
-                    format!("client fell {missed} updates behind"),
-                )),
-            });
+                Ok(update)
+            }
+            // tonic ends the stream after the first error
+            Err(BroadcastStreamRecvError::Lagged(missed)) => Err(Status::resource_exhausted(
+                format!("client fell {missed} updates behind"),
+            )),
+        });
 
         let mut response = Response::new(Box::pin(stream) as Self::SubscribeStream);
         response
@@ -110,70 +134,15 @@ fn check_token(tokens: &[String], request: Request<()>) -> Result<Request<()>, S
     }
 }
 
-/// Numbers every update and hands it to the subscribers.
-async fn produce(updates: broadcast::Sender<SubscribeResponse>, tx_per_sec: u64, tx_bytes: usize) {
-    let start = Instant::now();
-    let mut ticks = tokio::time::interval(TICK);
-    let mut seq = 0;
-    let mut txs_sent: u64 = 0;
-    let mut next_heartbeat = Duration::ZERO;
-    let mut slot = 0;
-    let mut in_slot = 0;
-
+/// Sends a heartbeat every second, the first one right away.
+async fn heartbeat(hub: Arc<Hub>) {
+    let mut ticks = tokio::time::interval(HEARTBEAT);
     loop {
         ticks.tick().await;
-        let elapsed = start.elapsed();
-        let now_slot = (elapsed.as_nanos() / SLOT_NS) as u64;
-        if now_slot != slot {
-            slot = now_slot;
-            in_slot = 0;
-        }
-
-        let due = (elapsed.as_nanos() * u128::from(tx_per_sec) / 1_000_000_000) as u64;
-        while txs_sent < due {
-            let tx = made_up_tx(slot, in_slot, seq, tx_bytes);
-            send(&updates, &mut seq, Kind::Tx(tx));
-            txs_sent += 1;
-            in_slot += 1;
-        }
-
-        if elapsed >= next_heartbeat {
-            let heartbeat = Heartbeat {
-                sent_ns: wall_ns(),
-                last_slot: slot,
-            };
-            send(&updates, &mut seq, Kind::Heartbeat(heartbeat));
-            next_heartbeat += HEARTBEAT;
-        }
-    }
-}
-
-fn send(updates: &broadcast::Sender<SubscribeResponse>, seq: &mut u64, kind: Kind) {
-    let update = SubscribeResponse {
-        seq: *seq,
-        filters: Vec::new(),
-        kind: Some(kind),
-    };
-    *seq += 1;
-    // with no subscribers the update is dropped, and its seq is still used up
-    let _ = updates.send(update);
-}
-
-/// A tx with the right shape and no real contents. The signature holds the seq.
-fn made_up_tx(slot: u64, position: u32, seq: u64, tx_bytes: usize) -> Tx {
-    let mut signature = vec![0; 64];
-    signature[..8].copy_from_slice(&seq.to_le_bytes());
-    let now = wall_ns();
-    Tx {
-        slot,
-        entry: 0,
-        position,
-        signature,
-        transaction: vec![0; tx_bytes],
-        rebuilt: false,
-        first_shred_ns: now,
-        decoded_ns: now,
-        emitted_ns: now,
+        hub.send(Kind::Heartbeat(Heartbeat {
+            sent_ns: wall_ns(),
+            last_slot: hub.last_slot(),
+        }));
     }
 }
 
@@ -190,7 +159,7 @@ fn boot_epoch() -> AsciiMetadataValue {
 }
 
 /// Wall clock, Unix epoch nanoseconds.
-fn wall_ns() -> u64 {
+pub(crate) fn wall_ns() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos() as u64)
