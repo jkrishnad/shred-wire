@@ -30,15 +30,15 @@ fn ingest_real_capture() {
     let mut seqs = Vec::new();
     let mut signatures = HashSet::new();
     while let Ok(update) = updates.try_recv() {
-        seqs.push(update.seq);
-        let Some(Kind::Tx(tx)) = update.kind else {
+        seqs.push(update.message.seq);
+        let Some(Kind::Tx(tx)) = &update.message.kind else {
             panic!("only txs come from ingest");
         };
         // the bytes sent decode back to the transaction, its first signature the one sent with it
         let transaction: VersionedTransaction = wincode::deserialize(&tx.transaction).unwrap();
         assert_eq!(transaction.signatures[0].as_ref(), tx.signature.as_slice());
         assert!(tx.first_shred_ns > 0 && tx.first_shred_ns <= tx.decoded_ns);
-        assert!(signatures.insert(tx.signature));
+        assert!(signatures.insert(tx.signature.clone()));
     }
     assert!(!signatures.is_empty());
     if let Ok(expected) = std::env::var("SHREDWIRE_TXS") {

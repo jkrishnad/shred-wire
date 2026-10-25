@@ -2,9 +2,11 @@
 //!
 //! source fills the hub: verified transactions from shreds, live or from a pcap file, or made-up ones.
 //! hub numbers every update with a global seq and hands a copy to each subscriber.
+//! filter decides which txs each subscriber gets. A client with no filters gets only heartbeats.
 //! A heartbeat goes out every second. A subscriber that falls too far behind is closed with
 //! RESOURCE_EXHAUSTED instead of slowing the others down.
 
+pub mod filter;
 pub mod hub;
 pub mod source;
 
@@ -27,6 +29,7 @@ use tonic::metadata::{AsciiMetadataValue, MetadataValue};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
+use filter::Filter;
 use hub::Hub;
 pub use source::Source;
 
@@ -99,19 +102,41 @@ impl FeedService for Feed {
         &self,
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
-        // filters are not checked against the transactions yet, so every tx matches all of them
-        let names: Vec<String> = request.into_inner().filters.into_keys().collect();
-        let stream = BroadcastStream::new(self.hub.subscribe()).map(move |update| match update {
-            Ok(mut update) => {
-                if matches!(update.kind, Some(Kind::Tx(_))) {
-                    update.filters = names.clone();
+        let filters = request
+            .into_inner()
+            .filters
+            .into_iter()
+            .map(|(name, filter)| match Filter::parse(&filter) {
+                Ok(filter) => Ok((name, filter)),
+                Err(e) => Err(Status::invalid_argument(format!("filter {name}: {e}"))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let stream = BroadcastStream::new(self.hub.subscribe()).filter_map(move |update| {
+            let update = match update {
+                Ok(update) => update,
+                // tonic ends the stream after the first error
+                Err(BroadcastStreamRecvError::Lagged(missed)) => {
+                    return Some(Err(Status::resource_exhausted(format!(
+                        "client fell {missed} updates behind"
+                    ))));
                 }
-                Ok(update)
+            };
+            // a heartbeat goes to everyone, a tx only with the names of the filters it matched
+            let Some(keys) = &update.keys else {
+                return Some(Ok(update.message.clone()));
+            };
+            let matched: Vec<String> = filters
+                .iter()
+                .filter(|(_, filter)| filter.matches(keys))
+                .map(|(name, _)| name.clone())
+                .collect();
+            if matched.is_empty() {
+                return None;
             }
-            // tonic ends the stream after the first error
-            Err(BroadcastStreamRecvError::Lagged(missed)) => Err(Status::resource_exhausted(
-                format!("client fell {missed} updates behind"),
-            )),
+            let mut message = update.message.clone();
+            message.filters = matched;
+            Some(Ok(message))
         });
 
         let mut response = Response::new(Box::pin(stream) as Self::SubscribeStream);
@@ -139,10 +164,11 @@ async fn heartbeat(hub: Arc<Hub>) {
     let mut ticks = tokio::time::interval(HEARTBEAT);
     loop {
         ticks.tick().await;
-        hub.send(Kind::Heartbeat(Heartbeat {
+        let heartbeat = Heartbeat {
             sent_ns: wall_ns(),
             last_slot: hub.last_slot(),
-        }));
+        };
+        hub.send(Kind::Heartbeat(heartbeat), None);
     }
 }
 

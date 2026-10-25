@@ -2,19 +2,29 @@
 //!
 //! The ingest thread and the heartbeat task both send, so the seq is taken and the update
 //! sent under one lock. Otherwise seq 6 could reach the channel before seq 5.
+//! Each update is shared, not copied, until a subscriber's filters let it through.
 //! Sending never waits: a subscriber that falls more than the buffer behind is lagged,
 //! and the server closes it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use proto::SubscribeResponse;
 use proto::subscribe_response::Kind;
 use tokio::sync::broadcast;
 
+use crate::filter::TxKeys;
+
+/// One numbered update, with what filters look at when it is a tx.
+#[derive(Debug)]
+pub struct Update {
+    pub message: SubscribeResponse,
+    pub keys: Option<TxKeys>,
+}
+
 pub struct Hub {
     /// The next seq, with the channel it goes out on.
-    next: Mutex<(u64, broadcast::Sender<SubscribeResponse>)>,
+    next: Mutex<(u64, broadcast::Sender<Arc<Update>>)>,
     /// Newest slot seen, for the heartbeat.
     last_slot: AtomicU64,
 }
@@ -30,22 +40,22 @@ impl Hub {
     }
 
     /// Numbers the update and hands it to every subscriber.
-    pub fn send(&self, kind: Kind) {
+    pub fn send(&self, kind: Kind, keys: Option<TxKeys>) {
         // a panic elsewhere while holding the lock leaves the seq and channel whole, so carry on
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         let (seq, sender) = &mut *next;
-        let update = SubscribeResponse {
+        let message = SubscribeResponse {
             seq: *seq,
             filters: Vec::new(),
             kind: Some(kind),
         };
         *seq += 1;
         // with no subscribers the update is dropped, and its seq is still used up
-        let _ = sender.send(update);
+        let _ = sender.send(Arc::new(Update { message, keys }));
     }
 
     /// A new reader that sees every update sent from now on.
-    pub fn subscribe(&self) -> broadcast::Receiver<SubscribeResponse> {
+    pub fn subscribe(&self) -> broadcast::Receiver<Arc<Update>> {
         let next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         next.1.subscribe()
     }

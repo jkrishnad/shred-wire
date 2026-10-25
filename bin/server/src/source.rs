@@ -20,6 +20,7 @@ use shred_core::pcap::{PacketSource, PcapReader, udp_payload};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::filter::TxKeys;
 use crate::hub::Hub;
 use crate::{Error, wall_ns};
 
@@ -101,6 +102,7 @@ pub fn ingest(source: &mut dyn PacketSource, leaders: &Path, hub: &Hub) -> Resul
         .changed()?
         .filter(|schedule| !schedule.is_empty())
         .ok_or_else(|| Error::NoLeaders(leaders.to_path_buf()))?;
+    eprintln!("leader schedule: {} slots", schedule.len());
 
     let mut assembler = Assembler::new().with_leaders(schedule).emit_early();
 
@@ -127,7 +129,10 @@ pub fn ingest(source: &mut dyn PacketSource, leaders: &Path, hub: &Hub) -> Resul
 /// Loads the folder again if it changed. A folder that can't be read keeps the schedule loaded.
 fn reload_leaders(dir: &mut LeaderDir, assembler: &mut Assembler) {
     match dir.changed() {
-        Ok(Some(leaders)) if !leaders.is_empty() => assembler.set_leaders(leaders),
+        Ok(Some(leaders)) if !leaders.is_empty() => {
+            eprintln!("leader schedule: {} slots", leaders.len());
+            assembler.set_leaders(leaders);
+        }
         Ok(_) => {}
         Err(e) => eprintln!("leader schedule: {e}, keeping the one loaded"),
     }
@@ -148,6 +153,7 @@ fn publish(hub: &Hub, event: Event) {
         return;
     };
     hub.saw_slot(slot);
+    let keys = TxKeys::of(&transaction);
     // written back in the same wire format it was decoded from
     let transaction = match wincode::serialize(&transaction) {
         Ok(bytes) => bytes,
@@ -156,7 +162,7 @@ fn publish(hub: &Hub, event: Event) {
             return;
         }
     };
-    hub.send(Kind::Tx(Tx {
+    let tx = Tx {
         slot,
         entry,
         position,
@@ -166,7 +172,8 @@ fn publish(hub: &Hub, event: Event) {
         first_shred_ns: timing.first_shred_ns,
         decoded_ns: timing.decoded_ns,
         emitted_ns: wall_ns(),
-    }));
+    };
+    hub.send(Kind::Tx(tx), Some(keys));
 }
 
 /// Sends made-up txs at a fixed rate, forever.
@@ -189,7 +196,8 @@ async fn made_up(hub: Arc<Hub>, tx_per_sec: u64, tx_bytes: usize) {
 
         let due = (elapsed.as_nanos() * u128::from(tx_per_sec) / 1_000_000_000) as u64;
         while txs_sent < due {
-            hub.send(Kind::Tx(made_up_tx(slot, in_slot, txs_sent, tx_bytes)));
+            let tx = made_up_tx(slot, in_slot, txs_sent, tx_bytes);
+            hub.send(Kind::Tx(tx), Some(TxKeys::default()));
             txs_sent += 1;
             in_slot += 1;
         }

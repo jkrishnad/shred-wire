@@ -44,15 +44,26 @@ async fn main() -> ExitCode {
 }
 
 async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    let source = match (args.interface, args.pcap, args.leaders) {
-        (Some(interface), _, Some(leaders)) => Source::Live { interface, leaders },
-        (_, Some(path), Some(leaders)) => Source::File { path, leaders },
-        _ => Source::Made {
-            tx_per_sec: args.tx_per_sec,
-            tx_bytes: args.tx_bytes,
-        },
+    let (source, from) = match (args.interface, args.pcap, args.leaders) {
+        (Some(interface), _, Some(leaders)) => {
+            let from = format!("capturing {interface}");
+            (Source::Live { interface, leaders }, from)
+        }
+        (_, Some(path), Some(leaders)) => {
+            let from = format!("reading {}", path.display());
+            (Source::File { path, leaders }, from)
+        }
+        _ => {
+            let from = format!("{} made-up txs a second", args.tx_per_sec);
+            let source = Source::Made {
+                tx_per_sec: args.tx_per_sec,
+                tx_bytes: args.tx_bytes,
+            };
+            (source, from)
+        }
     };
     let listener = TcpListener::bind(args.listen).await?;
+    eprintln!("listening on {}, {from}", args.listen);
     let config = server::Config {
         tokens: args.tokens,
         source,
