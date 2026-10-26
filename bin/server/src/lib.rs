@@ -35,7 +35,9 @@ use hub::Hub;
 pub use source::Source;
 
 /// Updates a subscriber may fall behind before it is closed.
-const BUFFER: usize = 4096;
+/// Txs come in bursts of thousands when a late FEC set lets the sets behind it decode,
+/// and with many subscribers a smaller ring cut healthy ones in replays of real traffic.
+const BUFFER: usize = 65536;
 const HEARTBEAT: Duration = Duration::from_secs(1);
 
 pub struct Config {
