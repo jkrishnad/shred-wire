@@ -1,3 +1,5 @@
+use std::process::ExitCode;
+
 use clap::Parser;
 use proto::TxFilter;
 use proto::subscribe_response::Kind;
@@ -17,7 +19,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     let args = Args::parse();
     let config = client::Config {
         url: args.url,
@@ -39,7 +41,15 @@ async fn main() {
                 }
                 None => {}
             },
+            Event::Retrying { reason, after } => {
+                eprintln!("not connected, {reason}, retrying in {after:?}")
+            }
+            Event::Stopped { reason } => {
+                eprintln!("stopped, {reason}");
+                return ExitCode::FAILURE;
+            }
             other => println!("{other:?}"),
         }
     }
+    ExitCode::SUCCESS
 }

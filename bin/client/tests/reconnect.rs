@@ -2,6 +2,7 @@
 //! (1) The connection drops, the server keeps running: every seq is either received
 //!     or inside a reported gap, exactly once. Nothing missing, nothing invented.
 //! (2) The server restarts: the client reports a reset, never a bogus backwards gap.
+//! (3) A wrong API key stops the client, it never retries.
 
 use std::net::SocketAddr;
 use std::ops::RangeInclusive;
@@ -21,7 +22,7 @@ async fn t2_connection_drop_reports_exact_gap() {
     let server_addr = free_addr();
     let _server = Server::start(server_addr);
     let proxy = Proxy::start(server_addr).await;
-    let mut events = start_client(proxy.addr);
+    let mut events = start_client(proxy.addr, KEY);
 
     let mut seqs = Vec::new();
     let mut gaps: Vec<RangeInclusive<u64>> = Vec::new();
@@ -64,10 +65,11 @@ async fn t2_connection_drop_reports_exact_gap() {
 async fn t2_server_restart_reports_reset_not_gap() {
     let addr = free_addr();
     let server = Server::start(addr);
-    let mut events = start_client(addr);
+    let mut events = start_client(addr, KEY);
 
     let mut epochs = Vec::new();
     let mut resets = Vec::new();
+    let mut retries = 0;
     let mut after_reset = 0;
     let mut server = Some(server);
     let run = async {
@@ -90,6 +92,8 @@ async fn t2_server_restart_reports_reset_not_gap() {
                 }
                 Event::Reset { old, new } => resets.push((old, new)),
                 Event::Gap { from, to } => panic!("a restart is a reset, not a gap {from}..={to}"),
+                Event::Retrying { .. } => retries += 1,
+                Event::Stopped { reason } => panic!("a restart is not a reason to stop, {reason}"),
             }
         }
     };
@@ -100,14 +104,32 @@ async fn t2_server_restart_reports_reset_not_gap() {
     assert_eq!(epochs.len(), 2, "two servers, two connects");
     assert_ne!(epochs[0], epochs[1], "a new boot gets a new epoch");
     assert_eq!(resets, vec![(epochs[0].clone(), epochs[1].clone())]);
+    assert!(retries > 0, "the time without a server is reported");
+}
+
+#[tokio::test]
+async fn t2_wrong_key_stops() {
+    let addr = free_addr();
+    let _server = Server::start(addr);
+    let mut events = start_client(addr, "wrong-key");
+
+    let event = timeout(Duration::from_secs(10), events.recv())
+        .await
+        .expect("client must answer a wrong key");
+    assert!(
+        matches!(event, Some(Event::Stopped { .. })),
+        "a wrong key stops the client, got {event:?}"
+    );
+    // nothing after a stop, the client is gone
+    assert!(events.recv().await.is_none());
 }
 
 /// Subscribes to everything, so heartbeats and txs together use every seq.
-fn start_client(addr: SocketAddr) -> mpsc::UnboundedReceiver<Event> {
+fn start_client(addr: SocketAddr, token: &str) -> mpsc::UnboundedReceiver<Event> {
     let (tx, rx) = mpsc::unbounded_channel();
     let config = client::Config {
         url: format!("http://{addr}"),
-        token: KEY.into(),
+        token: token.into(),
         filters: [("all".into(), TxFilter::default())].into(),
     };
     tokio::spawn(client::run(config, tx));

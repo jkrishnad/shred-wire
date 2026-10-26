@@ -140,6 +140,11 @@ fn reload_leaders(dir: &mut LeaderDir, assembler: &mut Assembler) {
 
 /// Sends a transaction to the hub. Markers, sets and slots are not sent.
 fn publish(hub: &Hub, event: Event) {
+    // every slot starts with a header marker, so a slot with no txs still moves last_slot
+    if let Event::Marker { slot, .. } = event {
+        hub.saw_slot(slot);
+        return;
+    }
     let Event::Tx {
         slot,
         signature,

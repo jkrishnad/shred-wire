@@ -5,15 +5,18 @@
 //! drop and the first one after it are reported as a gap. A new epoch means the server restarted
 //! and its seq began again, so that is reported as a reset instead.
 //! With filters, seqs of txs that did not match are inside a gap too.
+//! Each time it can't connect or the stream ends, it says why and when it tries again.
+//! A wrong API key or a bad filter can't be fixed by retrying, so then it stops.
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::time::Duration;
 
 use proto::feed_service_client::FeedServiceClient;
 use proto::{EPOCH_HEADER, TOKEN_HEADER};
 use proto::{SubscribeRequest, SubscribeResponse, TxFilter};
 use tokio::sync::mpsc;
-use tonic::{Request, Status, Streaming};
+use tonic::{Code, Request, Status, Streaming};
 
 const FIRST_BACKOFF: Duration = Duration::from_millis(100);
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
@@ -45,6 +48,15 @@ pub enum Event {
     Connected {
         epoch: String,
     },
+    /// Not connected, trying again after the wait.
+    Retrying {
+        reason: String,
+        after: Duration,
+    },
+    /// Refused for a reason retrying can't fix, like a wrong API key. Nothing comes after it.
+    Stopped {
+        reason: String,
+    },
 }
 
 /// Runs until the receiving side of events is dropped.
@@ -54,55 +66,74 @@ pub async fn run(config: Config, events: mpsc::UnboundedSender<Event>) {
     let mut last_seq: Option<u64> = None;
 
     loop {
-        if let Ok((new_epoch, mut stream)) = subscribe(&config).await {
-            backoff = FIRST_BACKOFF;
-            if events
-                .send(Event::Connected {
-                    epoch: new_epoch.clone(),
-                })
-                .is_err()
-            {
-                return;
-            }
-            if let Some(old) = epoch.replace(new_epoch.clone())
-                && old != new_epoch
-            {
-                last_seq = None;
+        let reason = match subscribe(&config).await {
+            Ok((new_epoch, mut stream)) => {
+                backoff = FIRST_BACKOFF;
                 if events
-                    .send(Event::Reset {
-                        old,
-                        new: new_epoch,
+                    .send(Event::Connected {
+                        epoch: new_epoch.clone(),
                     })
                     .is_err()
                 {
                     return;
                 }
-            }
-
-            // only the first update of a connection can follow a gap, the rest come in order
-            let mut first = true;
-            while let Ok(Some(update)) = stream.message().await {
-                if first
-                    && let Some(last) = last_seq
-                    && update.seq > last + 1
+                if let Some(old) = epoch.replace(new_epoch.clone())
+                    && old != new_epoch
                 {
-                    let gap = Event::Gap {
-                        from: last + 1,
-                        to: update.seq - 1,
-                    };
-                    if events.send(gap).is_err() {
+                    last_seq = None;
+                    if events
+                        .send(Event::Reset {
+                            old,
+                            new: new_epoch,
+                        })
+                        .is_err()
+                    {
                         return;
                     }
                 }
-                first = false;
-                last_seq = Some(update.seq);
-                if events.send(Event::Update(update)).is_err() {
-                    return;
+
+                // only the first update of a connection can follow a gap, the rest come in order
+                let mut first = true;
+                loop {
+                    let update = match stream.message().await {
+                        Ok(Some(update)) => update,
+                        Ok(None) => break "the server ended the stream".to_string(),
+                        Err(status) => break status.message().to_string(),
+                    };
+                    if first
+                        && let Some(last) = last_seq
+                        && update.seq > last + 1
+                    {
+                        let gap = Event::Gap {
+                            from: last + 1,
+                            to: update.seq - 1,
+                        };
+                        if events.send(gap).is_err() {
+                            return;
+                        }
+                    }
+                    first = false;
+                    last_seq = Some(update.seq);
+                    if events.send(Event::Update(update)).is_err() {
+                        return;
+                    }
                 }
             }
-        }
+            Err(status)
+                if matches!(status.code(), Code::Unauthenticated | Code::InvalidArgument) =>
+            {
+                let reason = status.message().to_string();
+                let _ = events.send(Event::Stopped { reason });
+                return;
+            }
+            Err(status) => status.message().to_string(),
+        };
 
-        if events.is_closed() {
+        let retry = Event::Retrying {
+            reason,
+            after: backoff,
+        };
+        if events.send(retry).is_err() {
             return;
         }
         tokio::time::sleep(backoff).await;
@@ -114,7 +145,7 @@ pub async fn run(config: Config, events: mpsc::UnboundedSender<Event>) {
 async fn subscribe(config: &Config) -> Result<(String, Streaming<SubscribeResponse>), Status> {
     let mut client = FeedServiceClient::connect(config.url.clone())
         .await
-        .map_err(|e| Status::unavailable(e.to_string()))?;
+        .map_err(|e| Status::unavailable(with_causes(&e)))?;
 
     let token = config
         .token
@@ -133,4 +164,19 @@ async fn subscribe(config: &Config) -> Result<(String, Streaming<SubscribeRespon
         .ok_or_else(|| Status::internal("server sent no boot epoch"))?
         .to_string();
     Ok((epoch, response.into_inner()))
+}
+
+/// The error and what caused it, like "transport error, connection refused".
+fn with_causes(error: &dyn Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut cause = error.source();
+    while let Some(next) = cause {
+        let part = next.to_string();
+        // some layers repeat the message of the one below
+        if parts.last() != Some(&part) {
+            parts.push(part);
+        }
+        cause = next.source();
+    }
+    parts.join(", ")
 }
