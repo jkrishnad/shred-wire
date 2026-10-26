@@ -1289,6 +1289,7 @@ name = "server"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "prost",
  "proto",
  "shred-core",
  "solana-transaction",

@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
+use prost::Message;
+use proto::SubscribeResponse;
 use proto::subscribe_response::Kind;
 use server::hub::Hub;
 use shred_core::pcap::PcapReader;
@@ -30,8 +32,11 @@ fn ingest_real_capture() {
     let mut seqs = Vec::new();
     let mut signatures = HashSet::new();
     while let Ok(update) = updates.try_recv() {
-        seqs.push(update.message.seq);
-        let Some(Kind::Tx(tx)) = &update.message.kind else {
+        // read back the way a client would, from the bytes the server sends
+        let bytes = update.response(Vec::new()).encode_to_vec();
+        let message = SubscribeResponse::decode(bytes.as_slice()).unwrap();
+        seqs.push(message.seq);
+        let Some(Kind::Tx(tx)) = &message.kind else {
             panic!("only txs come from ingest");
         };
         // the bytes sent decode back to the transaction, its first signature the one sent with it

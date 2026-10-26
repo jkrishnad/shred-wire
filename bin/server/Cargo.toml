@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 clap.workspace = true
 proto.workspace = true
+prost.workspace = true
 shred-core.workspace = true
 solana-transaction.workspace = true
 thiserror.workspace = true

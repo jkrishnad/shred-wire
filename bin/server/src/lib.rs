@@ -17,10 +17,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use proto::feed_service_server::{FeedService, FeedServiceServer};
+use proto::encoded::Encoded;
+use proto::encoded::feed_service_server::{FeedService, FeedServiceServer};
 use proto::subscribe_response::Kind;
 use proto::{EPOCH_HEADER, TOKEN_HEADER};
-use proto::{Heartbeat, SubscribeRequest, SubscribeResponse};
+use proto::{Heartbeat, SubscribeRequest};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
@@ -96,7 +97,7 @@ struct Feed {
 
 #[tonic::async_trait]
 impl FeedService for Feed {
-    type SubscribeStream = Pin<Box<dyn Stream<Item = Result<SubscribeResponse, Status>> + Send>>;
+    type SubscribeStream = Pin<Box<dyn Stream<Item = Result<Encoded, Status>> + Send>>;
 
     async fn subscribe(
         &self,
@@ -124,7 +125,7 @@ impl FeedService for Feed {
             };
             // a heartbeat goes to everyone, a tx only with the names of the filters it matched
             let Some(keys) = &update.keys else {
-                return Some(Ok(update.message.clone()));
+                return Some(Ok(update.response(Vec::new())));
             };
             let matched: Vec<String> = filters
                 .iter()
@@ -134,9 +135,7 @@ impl FeedService for Feed {
             if matched.is_empty() {
                 return None;
             }
-            let mut message = update.message.clone();
-            message.filters = matched;
-            Some(Ok(message))
+            Some(Ok(update.response(matched)))
         });
 
         let mut response = Response::new(Box::pin(stream) as Self::SubscribeStream);
