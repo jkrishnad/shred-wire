@@ -144,6 +144,7 @@ fn publish(hub: &Hub, event: Event) {
         slot,
         signature,
         transaction,
+        raw,
         entry,
         position,
         timing,
@@ -154,20 +155,13 @@ fn publish(hub: &Hub, event: Event) {
     };
     hub.saw_slot(slot);
     let keys = TxKeys::of(&transaction);
-    // written back in the same wire format it was decoded from
-    let transaction = match wincode::serialize(&transaction) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("slot {slot} tx {signature}: {e}, not sent");
-            return;
-        }
-    };
     let tx = Tx {
         slot,
         entry,
         position,
         signature: signature.as_ref().to_vec(),
-        transaction,
+        // the bytes as the leader encoded them, no need to encode again
+        transaction: raw,
         rebuilt,
         first_shred_ns: timing.first_shred_ns,
         decoded_ns: timing.decoded_ns,

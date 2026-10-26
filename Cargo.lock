@@ -1182,6 +1182,8 @@ version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7263373d500d4d4f505d43a2a662d475a894aa94503a1ee28e9188b5f3960d4f"
 dependencies = [
+ "cc",
+ "libc",
  "libm",
  "lru",
  "parking_lot",
@@ -1306,6 +1308,7 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+ "sha2-asm",
 ]
 
 [[package]]
@@ -1320,6 +1323,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2-asm"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b845214d6175804686b2bd482bcffe96651bb2d1200742b712003504a2dac1ab"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1327,8 +1339,8 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "shred-core"
-version = "0.4.0"
-source = "git+https://github.com/vyralabshq/shred-core?tag=v0.4.0#294b3808d226b62dd931aa3859ac0c2c7b9564e4"
+version = "0.5.0"
+source = "git+https://github.com/vyralabshq/shred-core?tag=v0.5.0#53eac265df71476155a427f4a7e23fcc5c440ccc"
 dependencies = [
  "pcap",
  "reed-solomon-erasure",
