@@ -10,6 +10,7 @@ edition = "2024"
 shredwire-proto = { path = "bin/proto" }
 shredwire-server = { path = "bin/server" }
 shredwire-client = { path = "bin/client" }
+bs58 = "0.5.1"
 clap = { version = "4.6.7", features = ["derive"] }
 prost = "0.14.4"
 protox = "0.10.0"
