@@ -8,10 +8,10 @@ use std::io::BufReader;
 use std::path::Path;
 
 use prost::Message;
-use proto::SubscribeResponse;
-use proto::subscribe_response::Kind;
-use server::hub::Hub;
 use shred_core::pcap::PcapReader;
+use shredwire_proto::SubscribeResponse;
+use shredwire_proto::subscribe_response::Kind;
+use shredwire_server::hub::Hub;
 use solana_transaction::versioned::VersionedTransaction;
 
 #[test]
@@ -27,7 +27,7 @@ fn ingest_real_capture() {
     let mut source = PcapReader::new(BufReader::new(file)).unwrap();
     let hub = Hub::new(8192);
     let mut updates = hub.subscribe();
-    server::source::ingest(&mut source, Path::new(&leaders), &hub).unwrap();
+    shredwire_server::source::ingest(&mut source, Path::new(&leaders), &hub).unwrap();
 
     let mut seqs = Vec::new();
     let mut signatures = HashSet::new();
@@ -65,7 +65,7 @@ fn ingest_refuses_without_leaders() {
         0x4d, 0x3c, 0xb2, 0xa1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0,
     ];
     let mut source = PcapReader::new(&header[..]).unwrap();
-    let result = server::source::ingest(&mut source, &empty, &Hub::new(16));
-    assert!(matches!(result, Err(server::Error::NoLeaders(_))));
+    let result = shredwire_server::source::ingest(&mut source, &empty, &Hub::new(16));
+    assert!(matches!(result, Err(shredwire_server::Error::NoLeaders(_))));
     std::fs::remove_dir_all(&empty).unwrap();
 }

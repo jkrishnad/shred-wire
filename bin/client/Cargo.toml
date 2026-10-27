@@ -1,13 +1,17 @@
 [package]
-name = "client"
+name = "shredwire-client"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "client"
+path = "src/main.rs"
+
 [dependencies]
 clap.workspace = true
-proto.workspace = true
+shredwire-proto.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
-server.workspace = true
+shredwire-server.workspace = true

@@ -17,11 +17,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use proto::encoded::Encoded;
-use proto::encoded::feed_service_server::{FeedService, FeedServiceServer};
-use proto::subscribe_response::Kind;
-use proto::{EPOCH_HEADER, TOKEN_HEADER};
-use proto::{Heartbeat, SubscribeRequest};
+use shredwire_proto::encoded::Encoded;
+use shredwire_proto::encoded::feed_service_server::{FeedService, FeedServiceServer};
+use shredwire_proto::subscribe_response::Kind;
+use shredwire_proto::{EPOCH_HEADER, TOKEN_HEADER};
+use shredwire_proto::{Heartbeat, SubscribeRequest};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};

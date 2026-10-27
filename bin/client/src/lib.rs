@@ -12,11 +12,14 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
 
-use proto::feed_service_client::FeedServiceClient;
-use proto::{EPOCH_HEADER, TOKEN_HEADER};
-use proto::{SubscribeRequest, SubscribeResponse, TxFilter};
+use shredwire_proto::feed_service_client::FeedServiceClient;
+use shredwire_proto::{EPOCH_HEADER, TOKEN_HEADER};
+use shredwire_proto::{SubscribeRequest, SubscribeResponse, TxFilter};
 use tokio::sync::mpsc;
 use tonic::{Code, Request, Status, Streaming};
+
+/// The message types, so a user needs only this crate.
+pub use shredwire_proto as proto;
 
 const FIRST_BACKOFF: Duration = Duration::from_millis(100);
 const MAX_BACKOFF: Duration = Duration::from_secs(5);

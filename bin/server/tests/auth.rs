@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use proto::TOKEN_HEADER;
-use proto::feed_service_client::FeedServiceClient;
-use proto::{SubscribeRequest, TxFilter};
+use shredwire_proto::TOKEN_HEADER;
+use shredwire_proto::feed_service_client::FeedServiceClient;
+use shredwire_proto::{SubscribeRequest, TxFilter};
 use tonic::{Code, Request};
 
 const KEY: &str = "right-key";
@@ -13,14 +13,14 @@ const KEY: &str = "right-key";
 async fn t1_auth() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let config = server::Config {
+    let config = shredwire_server::Config {
         tokens: vec![KEY.into()],
-        source: server::Source::Made {
+        source: shredwire_server::Source::Made {
             tx_per_sec: 1000,
             tx_bytes: 0,
         },
     };
-    tokio::spawn(server::serve(listener, config));
+    tokio::spawn(shredwire_server::serve(listener, config));
     let mut client = FeedServiceClient::connect(url).await.unwrap();
 
     // refused at the call itself: no response headers, no stream, so no data can leak

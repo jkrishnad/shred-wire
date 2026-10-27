@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use prost::bytes::Bytes;
-use proto::encoded::Encoded;
-use proto::subscribe_response::Kind;
+use shredwire_proto::encoded::Encoded;
+use shredwire_proto::subscribe_response::Kind;
 use tokio::sync::broadcast;
 
 use crate::filter::TxKeys;

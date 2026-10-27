@@ -243,17 +243,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "clap",
- "proto",
- "server",
- "tokio",
- "tonic",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1079,17 +1068,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proto"
-version = "0.1.0"
-dependencies = [
- "prost",
- "protox",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
-]
-
-[[package]]
 name = "protox"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1285,22 +1263,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "clap",
- "prost",
- "proto",
- "shred-core",
- "solana-transaction",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tonic",
- "wincode",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1352,6 +1314,44 @@ dependencies = [
  "solana-signature",
  "solana-transaction",
  "thiserror",
+ "wincode",
+]
+
+[[package]]
+name = "shredwire-client"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "shredwire-proto",
+ "shredwire-server",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
+name = "shredwire-proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "protox",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
+name = "shredwire-server"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "prost",
+ "shred-core",
+ "shredwire-proto",
+ "solana-transaction",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tonic",
  "wincode",
 ]
 

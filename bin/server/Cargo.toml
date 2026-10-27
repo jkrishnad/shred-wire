@@ -1,13 +1,17 @@
 [package]
-name = "server"
+name = "shredwire-server"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
 [dependencies]
 clap.workspace = true
-proto.workspace = true
 prost.workspace = true
 shred-core.workspace = true
+shredwire-proto.workspace = true
 solana-transaction.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

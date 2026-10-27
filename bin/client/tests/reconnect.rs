@@ -9,8 +9,8 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::Duration;
 
-use client::Event;
-use proto::TxFilter;
+use shredwire_client::Event;
+use shredwire_proto::TxFilter;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, mpsc};
 use tokio::time::timeout;
@@ -127,12 +127,12 @@ async fn t2_wrong_key_stops() {
 /// Subscribes to everything, so heartbeats and txs together use every seq.
 fn start_client(addr: SocketAddr, token: &str) -> mpsc::UnboundedReceiver<Event> {
     let (tx, rx) = mpsc::unbounded_channel();
-    let config = client::Config {
+    let config = shredwire_client::Config {
         url: format!("http://{addr}"),
         token: token.into(),
         filters: [("all".into(), TxFilter::default())].into(),
     };
-    tokio::spawn(client::run(config, tx));
+    tokio::spawn(shredwire_client::run(config, tx));
     rx
 }
 
@@ -163,14 +163,14 @@ impl Server {
             .build()
             .unwrap();
         runtime.spawn(async move {
-            let config = server::Config {
+            let config = shredwire_server::Config {
                 tokens: vec![KEY.into()],
-                source: server::Source::Made {
+                source: shredwire_server::Source::Made {
                     tx_per_sec: 1000,
                     tx_bytes: 0,
                 },
             };
-            server::serve(TcpListener::from_std(listener).unwrap(), config).await
+            shredwire_server::serve(TcpListener::from_std(listener).unwrap(), config).await
         });
         Server(Some(runtime))
     }

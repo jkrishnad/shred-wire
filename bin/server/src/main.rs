@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use server::Source;
+use shredwire_server::Source;
 use tokio::net::TcpListener;
 
 /// Streams shredwire updates over gRPC.
@@ -64,10 +64,10 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     };
     let listener = TcpListener::bind(args.listen).await?;
     eprintln!("listening on {}, {from}", args.listen);
-    let config = server::Config {
+    let config = shredwire_server::Config {
         tokens: args.tokens,
         source,
     };
-    server::serve(listener, config).await?;
+    shredwire_server::serve(listener, config).await?;
     Ok(())
 }

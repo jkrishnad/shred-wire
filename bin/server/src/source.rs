@@ -11,12 +11,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use proto::Tx;
-use proto::subscribe_response::Kind;
 use shred_core::assembler::{Assembler, Event};
 use shred_core::leaders::LeaderDir;
 use shred_core::live::LiveCapture;
 use shred_core::pcap::{PacketSource, PcapReader, udp_payload};
+use shredwire_proto::Tx;
+use shredwire_proto::subscribe_response::Kind;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 

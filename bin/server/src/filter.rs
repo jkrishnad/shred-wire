@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
-use proto::TxFilter;
+use shredwire_proto::TxFilter;
 use solana_transaction::simple_vote_transaction_checker::is_simple_vote_transaction_impl;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction::{Address, VersionedMessage};

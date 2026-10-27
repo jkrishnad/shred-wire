@@ -1,11 +1,11 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use proto::TxFilter;
-use proto::subscribe_response::Kind;
+use shredwire_proto::TxFilter;
+use shredwire_proto::subscribe_response::Kind;
 use tokio::sync::mpsc;
 
-use client::Event;
+use shredwire_client::Event;
 
 /// Subscribes to a shredwire server and prints what arrives.
 #[derive(Parser)]
@@ -21,13 +21,13 @@ struct Args {
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Args::parse();
-    let config = client::Config {
+    let config = shredwire_client::Config {
         url: args.url,
         token: args.token,
         filters: [("all".into(), TxFilter::default())].into(),
     };
     let (events, mut received) = mpsc::unbounded_channel();
-    tokio::spawn(client::run(config, events));
+    tokio::spawn(shredwire_client::run(config, events));
 
     while let Some(event) = received.recv().await {
         match event {
